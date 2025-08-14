@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
+import { Button } from "@/components/ui/button"
 
 // Set up the worker for react-pdf
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
@@ -61,6 +62,7 @@ function App() {
   return (
     <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
       <h1>PDF Content</h1>
+      <Button>Test</Button>
       <div className='text-red-500'>
         {pdfText || 'No text found in PDF'}
       </div>
