@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import './App.css'
 import { pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -19,7 +18,7 @@ function App() {
         setError(null)
         
         // Fetch the PDF file from the public directory
-        const response = await fetch('/ternakan.pdf')
+        const response = await fetch('/pdf/ternakan.pdf')
         if (!response.ok) {
           throw new Error('Failed to fetch PDF file')
         }
@@ -62,15 +61,7 @@ function App() {
   return (
     <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
       <h1>PDF Content</h1>
-      <div style={{ 
-        whiteSpace: 'pre-wrap', 
-        backgroundColor: '#f5f5f5', 
-        padding: '20px', 
-        borderRadius: '8px',
-        fontFamily: 'monospace',
-        fontSize: '14px',
-        lineHeight: '1.5'
-      }}>
+      <div className='text-red-500'>
         {pdfText || 'No text found in PDF'}
       </div>
     </div>
