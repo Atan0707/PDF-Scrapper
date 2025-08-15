@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import OpenAI from "openai";
 
 // Set up the worker for react-pdf
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
@@ -23,9 +24,24 @@ function App() {
   const [startPage, setStartPage] = useState<string>('')
   const [endPage, setEndPage] = useState<string>('')
   const [totalPages, setTotalPages] = useState<number>(0)
+  
+  const API_KEY=import.meta.env.VITE_GROQ_API_KEY;
+
+  // Initialize OpenAI client
+  const client = new OpenAI({
+    apiKey: API_KEY,
+    baseURL: "https://api.groq.com/openai/v1",
+    dangerouslyAllowBrowser: true,
+  });
+
+  const response = client.responses.create({
+    model: "openai/gpt-oss-20b",
+    input: "Tell me a fun fact about the moon in one sentence.",
+  });
 
   // Load PDF metadata to get total pages
   useEffect(() => {
+    console.log("API_KEY: ",API_KEY)
     const loadPdfMetadata = async () => {
       try {
         const response = await fetch('/pdf/ternakan.pdf')
