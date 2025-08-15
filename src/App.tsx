@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import OpenAI from "openai";
+import OpenAI from "openai"
+import { PDF_EXTRACTION_PROMPT } from "./prompt"
 
 // Set up the worker for react-pdf
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
@@ -17,6 +18,22 @@ interface PageText {
   text: string
 }
 
+interface ExtractedData {
+  title: string
+  year: string
+  source: string
+  livestock_types: string[]
+  summary: {
+    jumlah: Record<string, number>
+    pertubuhan: Record<string, number>
+    individu: Record<string, number>
+  }
+  states: Record<string, Record<string, {
+    individu: number
+    pertubuhan: number
+  }>>
+}
+
 function App() {
   const [pageTexts, setPageTexts] = useState<PageText[]>([])
   const [loading, setLoading] = useState(false)
@@ -24,6 +41,8 @@ function App() {
   const [startPage, setStartPage] = useState<string>('')
   const [endPage, setEndPage] = useState<string>('')
   const [totalPages, setTotalPages] = useState<number>(0)
+  const [extractedData, setExtractedData] = useState<ExtractedData | null>(null)
+  const [processingWithAI, setProcessingWithAI] = useState(false)
   
   const API_KEY=import.meta.env.VITE_GROQ_API_KEY;
 
@@ -32,11 +51,6 @@ function App() {
     apiKey: API_KEY,
     baseURL: "https://api.groq.com/openai/v1",
     dangerouslyAllowBrowser: true,
-  });
-
-  const response = client.responses.create({
-    model: "openai/gpt-oss-20b",
-    input: "Tell me a fun fact about the moon in one sentence.",
   });
 
   // Load PDF metadata to get total pages
@@ -59,7 +73,7 @@ function App() {
     }
     
     loadPdfMetadata()
-  }, [])
+  }, [API_KEY])
 
   const extractPagesText = async () => {
     try {
@@ -109,6 +123,53 @@ function App() {
       console.error('Error extracting pages:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const processWithAI = async () => {
+    if (pageTexts.length === 0) {
+      setError('No extracted text available to process')
+      return
+    }
+
+    try {
+      setProcessingWithAI(true)
+      setError(null)
+      
+      // Combine all page texts
+      const combinedText = pageTexts.map(page => page.text).join('\n\n')
+      
+      // Call OpenAI API
+      const completion = await client.chat.completions.create({
+        model: "llama-3.1-70b-versatile",
+        messages: [
+          {
+            role: "system",
+            content: PDF_EXTRACTION_PROMPT
+          },
+          {
+            role: "user", 
+            content: `Please extract and format the following PDF text data:\n\n${combinedText}`
+          }
+        ],
+        temperature: 0.1, // Low temperature for more consistent output
+        max_tokens: 4000
+      })
+
+      const responseContent = completion.choices[0]?.message?.content
+      if (!responseContent) {
+        throw new Error('No response from AI')
+      }
+
+      // Parse the JSON response
+      const parsedData: ExtractedData = JSON.parse(responseContent)
+      setExtractedData(parsedData)
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred while processing with AI')
+      console.error('Error processing with AI:', err)
+    } finally {
+      setProcessingWithAI(false)
     }
   }
 
@@ -182,7 +243,61 @@ function App() {
 
         {pageTexts.length > 0 && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Extracted Content</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">Extracted Content</h2>
+              <Button 
+                onClick={processWithAI}
+                disabled={processingWithAI}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {processingWithAI ? '🤖 Processing...' : '🤖 Format as JSON'}
+              </Button>
+            </div>
+
+            {extractedData && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    ✨ Formatted JSON Data
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="bg-gray-900 p-4 rounded-lg border overflow-auto max-h-96">
+                    <pre className="text-green-400 text-sm font-mono leading-relaxed">
+                      {JSON.stringify(extractedData, null, 2)}
+                    </pre>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <Button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(JSON.stringify(extractedData, null, 2))
+                      }}
+                      variant="outline"
+                      size="sm"
+                    >
+                      📋 Copy JSON
+                    </Button>
+                    <Button 
+                      onClick={() => {
+                        const dataStr = JSON.stringify(extractedData, null, 2)
+                        const dataBlob = new Blob([dataStr], {type: 'application/json'})
+                        const url = URL.createObjectURL(dataBlob)
+                        const link = document.createElement('a')
+                        link.href = url
+                        link.download = 'livestock-data.json'
+                        link.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                      variant="outline"
+                      size="sm"
+                    >
+                      💾 Download JSON
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {pageTexts.map((pageData, index) => (
               <Card key={pageData.pageNumber}>
                 <CardHeader>
