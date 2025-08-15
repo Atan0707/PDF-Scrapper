@@ -141,11 +141,11 @@ function App() {
       
       // Call OpenAI API
       const completion = await client.chat.completions.create({
-        model: "llama-3.1-70b-versatile",
+        model: "openai/gpt-oss-20b", // You can change your model here
         messages: [
           {
             role: "system",
-            content: PDF_EXTRACTION_PROMPT
+            content: PDF_EXTRACTION_PROMPT // You can custom the prompt on prompt.ts
           },
           {
             role: "user", 
