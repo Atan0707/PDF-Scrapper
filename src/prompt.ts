@@ -174,27 +174,26 @@
 
 // Ni prompt untuk extract data from table
 export const PDF_EXTRACTION_PROMPT = `
-Extract the following raw text into structured data.
-Rules:
+Extract the raw text into structured JSON and CSV.
 
-Identify the correct table headers, even if repeated or noisy.
+Rules
+
+Detect table type automatically (single-category, multi-category by state, or multi-category by district).
 
 Parse numbers as numeric values (not strings).
 
-If a value is missing (e.g. "." or "-"), return 0 in JSON and 0 in CSV.
+Missing values (e.g. "." or "-") → return null in JSON, leave blank in CSV.
 
-Return both JSON and CSV.
+Nest districts inside their parent state (for Table 11.4).
 
-For tables with sub-categories (Individual, Establishment, Agriculture Holding), nest them in JSON.
+Always output both JSON and CSV.
 
-Raw text:
-
+Raw text
 [PASTE RAW OCR TEXT HERE]
 
+✅ Expected JSON outputs
 
-Expected JSON structure:
-
-For single-category tables (like Table 11.0):
+Case 1 – Single-category (Table 11.0):
 
 [
   {
@@ -214,7 +213,7 @@ For single-category tables (like Table 11.0):
 ]
 
 
-For multi-category tables (like Table 11.3):
+Case 2 – Multi-category by State (Table 11.3):
 
 [
   {
@@ -256,12 +255,41 @@ For multi-category tables (like Table 11.3):
 ]
 
 
-Expected CSV output for multi-category tables (flattened):
+Case 3 – Multi-category by District (Table 11.4):
 
-State,Individual Number,Individual Sales Quantity (Head),Individual Sales Value (RM '000),Establishment Number,Establishment Sales Quantity (Head),Establishment Sales Value (RM '000),Agriculture Holding Number,Agriculture Holding Sales Quantity (Head),Agriculture Holding Sales Value (RM '000)
-Malaysia,7143,15759231.8,273267.38,1120,899361526.0,13036838.58,8263,915120757.8,13310105.96
-Johor,371,2866142.0,48195.79,214,201783010.0,2923044.64,585,204649152.0,2971240.43
-Kedah,228,194140.0,3309.45,86,96298588.0,1330452.98,314,96492728.0,1333762.44
+
+[
+  {
+    "State": "Johor",
+    "Totals": {
+      "Individual": { "Sales Quantity (Head)": 2866142.0, "Sales Value (RM '000)": 48195.79 },
+      "Establishment": { "Sales Quantity (Head)": 201783010.0, "Sales Value (RM '000)": 2923044.64 },
+      "Agriculture Holding": { "Sales Quantity (Head)": 204649152.0, "Sales Value (RM '000)": 2971240.43 }
+    },
+    "Districts": [
+      {
+        "District": "Batu Pahat",
+        "Individual": { "Sales Quantity (Head)": 237769.0, "Sales Value (RM '000)": 3770.66 },
+        "Establishment": { "Sales Quantity (Head)": 64311684.0, "Sales Value (RM '000)": 890028.44 },
+        "Agriculture Holding": { "Sales Quantity (Head)": 64549453.0, "Sales Value (RM '000)": 893799.10 }
+      },
+      {
+        "District": "Johor Bahru",
+        "Individual": { "Sales Quantity (Head)": 174893.0, "Sales Value (RM '000)": 2218.39 },
+        "Establishment": { "Sales Quantity (Head)": 14929695.0, "Sales Value (RM '000)": 215643.96 },
+        "Agriculture Holding": { "Sales Quantity (Head)": 15104588.0, "Sales Value (RM '000)": 217862.36 }
+      }
+    ]
+  }
+]
+
+✅ Expected CSV outputs
+
+Flattened version for Case 3 (district-level):
+
+State,District,Individual Sales Quantity (Head),Individual Sales Value (RM '000),Establishment Sales Quantity (Head),Establishment Sales Value (RM '000),Agriculture Holding Sales Quantity (Head),Agriculture Holding Sales Value (RM '000)
+Johor,Batu Pahat,237769.0,3770.66,64311684.0,890028.44,64549453.0,893799.10
+Johor,Johor Bahru,174893.0,2218.39,14929695.0,215643.96,15104588.0,217862.36
+Johor,Kluang,885628.0,13421.12,16054967.0,255248.72,16940595.0,268669.85
 ...
-
-]`;
+`;
