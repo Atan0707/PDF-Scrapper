@@ -39,7 +39,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [startPage, setStartPage] = useState<string>('')
-  const [endPage, setEndPage] = useState<string>('')
+  const [endPage] = useState<string>('')
   const [totalPages, setTotalPages] = useState<number>(0)
   const [extractedData, setExtractedData] = useState<ExtractedData | null>(null)
   const [processingWithAI, setProcessingWithAI] = useState(false)
@@ -161,8 +161,18 @@ function App() {
         throw new Error('No response from AI')
       }
 
+      // Clean the response content by removing markdown code blocks if present
+      let cleanedResponse = responseContent.trim()
+      
+      // Remove ```json and ``` markers if they exist
+      if (cleanedResponse.startsWith('```json')) {
+        cleanedResponse = cleanedResponse.replace(/^```json\s*/, '').replace(/```\s*$/, '')
+      } else if (cleanedResponse.startsWith('```')) {
+        cleanedResponse = cleanedResponse.replace(/^```\s*/, '').replace(/```\s*$/, '')
+      }
+      
       // Parse the JSON response
-      const parsedData: ExtractedData = JSON.parse(responseContent)
+      const parsedData: ExtractedData = JSON.parse(cleanedResponse.trim())
       setExtractedData(parsedData)
       
     } catch (err) {
@@ -171,6 +181,76 @@ function App() {
     } finally {
       setProcessingWithAI(false)
     }
+  }
+
+  const convertToCSV = (data: ExtractedData): string => {
+    const lines: string[] = []
+    
+    // Header with document info
+    lines.push(`${data.title}`)
+    lines.push(`Tahun: ${data.year}`)
+    lines.push(`Sumber: ${data.source}`)
+    lines.push(`Jenis Ternakan: ${data.livestock_types.join(', ')}`)
+    lines.push('')
+    
+    // Summary data
+    lines.push('Ringkasan Data')
+    lines.push('Category,Type,Total,' + data.livestock_types.join(','))
+    
+    // JUMLAH row
+    const jumlahRow = ['JUMLAH', 'Total', data.summary.jumlah.total]
+    data.livestock_types.forEach(type => {
+      jumlahRow.push(data.summary.jumlah[type] || 0)
+    })
+    lines.push(jumlahRow.join(','))
+    
+    // PERTUBUHAN row
+    const pertubRows = ['PERTUBUHAN', 'Total', data.summary.pertubuhan.total]
+    data.livestock_types.forEach(type => {
+      pertubRows.push(data.summary.pertubuhan[type] || 0)
+    })
+    lines.push(pertubRows.join(','))
+    
+    // INDIVIDU row
+    const individuRow = ['INDIVIDU', 'Total', data.summary.individu.total]
+    data.livestock_types.forEach(type => {
+      individuRow.push(data.summary.individu[type] || 0)
+    })
+    lines.push(individuRow.join(','))
+    
+    lines.push('')
+    
+    // State-wise data
+    lines.push('Data mengikut negeri')
+    
+    // Create headers for state data
+    const stateHeaders = ['State', 'Livestock_Type', 'Category', 'Count']
+    lines.push(stateHeaders.join(','))
+    
+    // Add state data rows
+    Object.entries(data.states).forEach(([stateName, stateData]) => {
+      data.livestock_types.forEach(livestockType => {
+        if (stateData[livestockType]) {
+          lines.push([stateName, livestockType, 'individu', stateData[livestockType].individu].join(','))
+          lines.push([stateName, livestockType, 'pertubuhan', stateData[livestockType].pertubuhan].join(','))
+        }
+      })
+    })
+    
+    return lines.join('\n')
+  }
+
+  const downloadCSV = () => {
+    if (!extractedData) return
+    
+    const csvContent = convertToCSV(extractedData)
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `livestock-data-${extractedData.year}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -194,8 +274,9 @@ function App() {
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               <div>
-                <Label htmlFor="startPage" className="text-sm font-medium">
-                  Start Page
+                {/* Before this aku buat dia as start page */}
+                <Label htmlFor="startPage" className="text-sm font-medium"> 
+                  Page 
                 </Label>
                 <Input
                   id="startPage"
@@ -208,7 +289,8 @@ function App() {
                   className="mt-1"
                 />
               </div>
-              <div>
+              {/* Last page yang dia nak baca */}
+              {/* <div>
                 <Label htmlFor="endPage" className="text-sm font-medium">
                   End Page (optional - leave empty for single page)
                 </Label>
@@ -222,7 +304,7 @@ function App() {
                   max={totalPages}
                   className="mt-1"
                 />
-              </div>
+              </div> */}
             </div>
 
             <Button 
@@ -267,7 +349,7 @@ function App() {
                       {JSON.stringify(extractedData, null, 2)}
                     </pre>
                   </div>
-                  <div className="mt-4 flex gap-2">
+                  <div className="mt-4 flex gap-2 flex-wrap">
                     <Button 
                       onClick={() => {
                         navigator.clipboard.writeText(JSON.stringify(extractedData, null, 2))
@@ -292,6 +374,14 @@ function App() {
                       size="sm"
                     >
                       💾 Download JSON
+                    </Button>
+                    <Button 
+                      onClick={downloadCSV}
+                      variant="outline"
+                      size="sm"
+                      className="bg-green-50 hover:bg-green-100 border-green-300"
+                    >
+                      📊 Download CSV
                     </Button>
                   </div>
                 </CardContent>
