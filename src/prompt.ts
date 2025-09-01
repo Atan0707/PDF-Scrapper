@@ -174,27 +174,27 @@
 
 // Ni prompt untuk extract data from table
 export const PDF_EXTRACTION_PROMPT = `
-Extract the table data below into structured JSON.
-Columns:
+Extract the following raw text into structured data.
+Rules:
 
-State
+Identify the correct table headers, even if repeated or noisy.
 
-Number of Agriculture Holding
+Parse numbers as numeric values (not strings).
 
-Production Quantity (Head)
+If a value is missing (e.g. "." or "-"), return 0 in JSON and 0 in CSV.
 
-Sales Quantity (Head)
+Return both JSON and CSV.
 
-Sales Value (RM '000)
+For tables with sub-categories (Individual, Establishment, Agriculture Holding), nest them in JSON.
 
 Raw text:
 
-Jadual 11.0: Parameter Utama bagi Ternakan Ayam/Itik mengikut Negeri, Malaysia, 2023  Table 11.0: Key Parameters for Chicken/Duck by State, Malaysia, 2023  Jadual 11.0: Parameter Utama bagi Ternakan Ayam/Itik mengikut Negeri, Malaysia, 2023  Table 11.0: Key Parameters for Chicken/Duck by State, Malaysia, 2023  Negeri  State  Bilangan Pegangan  Pertanian  Number of Agriculture  Holding  Kuantiti Pengeluaran  (Ekor)  Production Quantity  (Head)  Kuantiti Jualan  (Ekor)  Sales Quantity  (Head)  Nilai Jualan  (RM '000)  Sales Value  (RM '000)  Malaysia   8,263   1,002,863,083.4   915,120,757.8   13,310,105.96  Johor   585   231,017,572.0   204,649,152.0   2,971,240.43  Kedah   314   97,494,694.0   96,492,728.0   1,333,762.44  Kelantan   1,604   13,303,037.0   12,815,507.0   168,723.05  Melaka   301   29,428,183.0   21,738,484.0   319,605.48  Negeri Sembilan   527   119,951,574.0   106,935,064.0   1,436,504.20  Pahang   384   57,230,358.0   56,008,503.0   787,550.08  Pulau Pinang   113   68,430,817.0   67,406,826.0   909,662.33  Perak   585   181,780,523.0   172,232,892.0   2,780,271.13  Perlis   105   7,744,675.0   7,681,298.0   100,203.34  Selangor   422   76,985,823.0   73,654,617.0   1,089,141.74  Terengganu   1,987   13,302,378.0   12,546,416.0   167,624.42  Sabah   593   81,196,290.4   73,837,314.8   1,118,509.22  Sarawak   734   24,775,052.0   9,080,482.0   126,468.50  W.P. Kuala Lumpur   3   243.0   200.0   8.15  W.P. Labuan   29   221,864.0   41,274.0   831.46  W.P. Putrajaya   -   .   .   .  Sumber: Banci Pertanian 2024  Source: Agriculture Census 2024  * Nota:  1. Analisa pada 28 Mei 2025  2. Negeri merujuk kepada lokasi aktiviti pertanian  * Notes:  1. Analysis as at 28 May 2025  2. State refers to agriculture activities' location 345
+[PASTE RAW OCR TEXT HERE]
 
 
-IMPORTANT: Return ONLY valid JSON without any markdown formatting, explanations, or code blocks. Do not wrap the JSON in code block markers.
+Expected JSON structure:
 
-Return the data in the exact format:
+For single-category tables (like Table 11.0):
 
 [
   {
@@ -211,5 +211,57 @@ Return the data in the exact format:
     "Sales Quantity (Head)": 204649152.0,
     "Sales Value (RM '000)": 2971240.43
   }
-  ...
+]
+
+
+For multi-category tables (like Table 11.3):
+
+[
+  {
+    "State": "Malaysia",
+    "Individual": {
+      "Number": 7143,
+      "Sales Quantity (Head)": 15759231.8,
+      "Sales Value (RM '000)": 273267.38
+    },
+    "Establishment": {
+      "Number": 1120,
+      "Sales Quantity (Head)": 899361526.0,
+      "Sales Value (RM '000)": 13036838.58
+    },
+    "Agriculture Holding": {
+      "Number": 8263,
+      "Sales Quantity (Head)": 915120757.8,
+      "Sales Value (RM '000)": 13310105.96
+    }
+  },
+  {
+    "State": "Johor",
+    "Individual": {
+      "Number": 371,
+      "Sales Quantity (Head)": 2866142.0,
+      "Sales Value (RM '000)": 48195.79
+    },
+    "Establishment": {
+      "Number": 214,
+      "Sales Quantity (Head)": 201783010.0,
+      "Sales Value (RM '000)": 2923044.64
+    },
+    "Agriculture Holding": {
+      "Number": 585,
+      "Sales Quantity (Head)": 204649152.0,
+      "Sales Value (RM '000)": 2971240.43
+    }
+  }
+]
+
+
+Expected CSV output for multi-category tables (flattened):
+
+State,Individual Number,Individual Sales Quantity (Head),Individual Sales Value (RM '000),Establishment Number,Establishment Sales Quantity (Head),Establishment Sales Value (RM '000),Agriculture Holding Number,Agriculture Holding Sales Quantity (Head),Agriculture Holding Sales Value (RM '000)
+Malaysia,7143,15759231.8,273267.38,1120,899361526.0,13036838.58,8263,915120757.8,13310105.96
+Johor,371,2866142.0,48195.79,214,201783010.0,2923044.64,585,204649152.0,2971240.43
+Kedah,228,194140.0,3309.45,86,96298588.0,1330452.98,314,96492728.0,1333762.44
+...
+
 ]`;
