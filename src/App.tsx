@@ -43,6 +43,8 @@ function App() {
   const [totalPages, setTotalPages] = useState<number>(0)
   const [extractedData, setExtractedData] = useState<ExtractedData | Record<string, string | number>[] | null>(null)
   const [processingWithAI, setProcessingWithAI] = useState(false)
+  const [excelTableData, setExcelTableData] = useState<string>('')
+  const [generatingTable, setGeneratingTable] = useState(false)
   
   const API_KEY=import.meta.env.VITE_GROQ_API_KEY;
 
@@ -387,6 +389,8 @@ function App() {
               }
               
               setExtractedData(result as ExtractedData | Record<string, string | number>[])
+              // Generate Excel table after setting data
+              generateTableData(result as ExtractedData | Record<string, string | number>[])
               return
             }
           } catch (e) {
@@ -400,6 +404,8 @@ function App() {
       }
       
       setExtractedData(parsedData as ExtractedData)
+      // Generate Excel table after setting data
+      generateTableData(parsedData as ExtractedData)
       
     } catch (err) {
       console.error('Error processing with AI:', err)
@@ -417,6 +423,19 @@ function App() {
       setError(errorMessage)
     } finally {
       setProcessingWithAI(false)
+    }
+  }
+
+  const generateTableData = async (data: ExtractedData | Record<string, string | number>[]) => {
+    try {
+      setGeneratingTable(true)
+      const tableData = await generateExcelTable(data)
+      setExcelTableData(tableData)
+    } catch (error) {
+      console.error('Error generating table data:', error)
+      setExcelTableData('Error generating table data')
+    } finally {
+      setGeneratingTable(false)
     }
   }
 
@@ -521,89 +540,81 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  const generateExcelTable = (data: ExtractedData | Record<string, string | number>[]): string => {
-    // Check if data is an array (table format) or the old nested format
-    if (Array.isArray(data)) {
-      // Handle array format (table data)
-      if (data.length === 0) return ''
+  const generateExcelTable = async (data: ExtractedData | Record<string, string | number>[]): Promise<string> => {
+    try {
+      console.log('Generating Excel table with AI...')
       
-      // Get headers from the first object
-      const headers = Object.keys(data[0])
-      const headerRow = headers.join('\t')
-      
-      // Generate data rows
-      const dataRows = data.map(row => 
-        headers.map(header => {
-          const value = row[header]
-          // Handle null, undefined, or empty string cases
-          if (value === null || value === undefined || value === '') {
-            return '-'
+      const completion = await client.chat.completions.create({
+        model: "openai/gpt-oss-20b",
+        messages: [
+          {
+            role: "system",
+            content: `You are a data formatting expert. Convert JSON data into tab-separated table format suitable for Excel/Google Sheets.
+
+Rules:
+1. Create clear, descriptive headers by flattening nested objects
+2. For nested objects like {"Individual": {"Number": 123, "Sales": 456}}, create headers like "Individual Number" and "Individual Sales"
+3. Each row should be tab-separated values
+4. Handle missing/null values as "-"
+5. Keep numbers as numbers (no quotes)
+6. Return ONLY the table data, no explanations or markdown
+7. First line should be headers, followed by data rows
+8. Make headers human-readable and professional
+
+Example:
+Input: [{"State": "Malaysia", "Individual": {"Number": 123, "Sales Quantity": 456}}]
+Output:
+State	Individual Number	Individual Sales Quantity
+Malaysia	123	456`
+          },
+          {
+            role: "user",
+            content: `Convert this JSON data to tab-separated table format:\n\n${JSON.stringify(data, null, 2)}`
           }
-          // Return the value as string
-          return String(value)
-        }).join('\t')
-      )
-      
-      return [headerRow, ...dataRows].join('\n')
-    } else {
-      // Handle old nested format for backward compatibility
-      const lines: string[] = []
-      
-      // Create headers based on your example format
-      const headers = [
-        'State',
-        'Number of Individuals',
-        'Production Quantity (Individuals)',
-        'Number of Establishments', 
-        'Production Quantity (Establishments)',
-        'Number of Agriculture Holdings',
-        'Production Quantity (Agriculture Holdings)'
-      ]
-      
-      lines.push(headers.join('\t'))
-      
-      // Add Malaysia total row first
-      const malaysiaTotals = [
-        'Malaysia',
-        data.summary?.individu?.total || 0,
-        0, // Production for individuals - would need to be calculated if available
-        data.summary?.pertubuhan?.total || 0,
-        0, // Production for establishments - would need to be calculated if available  
-        (data.summary?.individu?.total || 0) + (data.summary?.pertubuhan?.total || 0),
-        0  // Total production - would need to be calculated if available
-      ]
-      lines.push(malaysiaTotals.join('\t'))
-      
-      // Add state data
-      if (data.states) {
-        Object.entries(data.states).forEach(([stateName, stateData]: [string, Record<string, { individu: number; pertubuhan: number }>]) => {
-          // Calculate totals for this state across all livestock types
-          let totalIndividu = 0
-          let totalPertubuhan = 0
-          
-          if (data.livestock_types) {
-            data.livestock_types.forEach((type: string) => {
-              if (stateData[type]) {
-                totalIndividu += stateData[type].individu || 0
-                totalPertubuhan += stateData[type].pertubuhan || 0
-              }
-            })
-          }
-          
-          const stateRow = [
-            stateName.charAt(0).toUpperCase() + stateName.slice(1).replace(/_/g, ' '),
-            totalIndividu,
-            0, // Production quantity for individuals
-            totalPertubuhan, 
-            0, // Production quantity for establishments
-            totalIndividu + totalPertubuhan,
-            0  // Total production quantity
-          ]
-          lines.push(stateRow.join('\t'))
-        })
+        ],
+        temperature: 0.1,
+        max_tokens: 20000
+      })
+
+      const response = completion.choices[0]?.message?.content
+      if (!response) {
+        throw new Error('No response from AI for table generation')
       }
+
+      // Clean the response to ensure it's just the table
+      let cleanedTable = response.trim()
       
-      return lines.join('\n')
+      // Remove any markdown formatting
+      cleanedTable = cleanedTable.replace(/```\w*\n?/g, '').replace(/```/g, '').trim()
+      
+      console.log('✅ Successfully generated Excel table with AI')
+      return cleanedTable
+      
+    } catch (error) {
+      console.error('Error generating Excel table with AI:', error)
+      
+      // Fallback to simple stringification if AI fails
+      if (Array.isArray(data)) {
+        if (data.length === 0) return 'No data available'
+        
+        console.log('Using fallback table generation...')
+        // Simple fallback - just show the JSON structure
+        const headers = Object.keys(data[0])
+        const headerRow = headers.join('\t')
+        const rows = data.map(row => 
+          headers.map(key => {
+            const value = row[key]
+            if (typeof value === 'object' && value !== null) {
+              return JSON.stringify(value)
+            }
+            return String(value || '-')
+          }).join('\t')
+        )
+        
+        return [headerRow, ...rows].join('\n')
+      } else {
+        return 'Data format not supported for table generation'
+      }
     }
   }
 
@@ -711,7 +722,7 @@ function App() {
                       </Label>
                       <textarea
                         readOnly
-                        value={generateExcelTable(extractedData)}
+                        value={generatingTable ? 'Generating table with AI...' : excelTableData}
                         className="w-full h-40 p-3 text-xs font-mono bg-gray-50 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         placeholder="Table data will appear here..."
                         onClick={(e) => {
@@ -766,14 +777,29 @@ function App() {
                     </Button>
                     <Button 
                       onClick={() => {
-                        const tableData = generateExcelTable(extractedData)
-                        navigator.clipboard.writeText(tableData)
+                        if (excelTableData) {
+                          navigator.clipboard.writeText(excelTableData)
+                        }
                       }}
                       variant="outline"
                       size="sm"
                       className="bg-blue-50 hover:bg-blue-100 border-blue-300"
+                      disabled={generatingTable || !excelTableData}
                     >
                       📋 Copy Excel Table
+                    </Button>
+                    <Button 
+                      onClick={() => {
+                        if (extractedData) {
+                          generateTableData(extractedData)
+                        }
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="bg-purple-50 hover:bg-purple-100 border-purple-300"
+                      disabled={generatingTable || !extractedData}
+                    >
+                      🔄 Regenerate Table
                     </Button>
                   </div>
                 </CardContent>
