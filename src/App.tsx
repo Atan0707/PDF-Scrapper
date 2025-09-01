@@ -46,6 +46,7 @@ function App() {
   const [excelTableData, setExcelTableData] = useState<string>('')
   const [generatingTable, setGeneratingTable] = useState(false)
   const [autoGenerateTable, setAutoGenerateTable] = useState(false)
+  const [jsonExpanded, setJsonExpanded] = useState(false)
   
   const API_KEY=import.meta.env.VITE_GROQ_API_KEY;
 
@@ -159,7 +160,7 @@ function App() {
           }
         ],
         temperature: 0.1, // Low temperature for more consistent output
-        max_tokens: 20000 // Increased to handle larger responses
+        max_tokens: 65536 // Further increased to handle large multi-page responses
       })
 
       responseContent = completion.choices[0]?.message?.content || ''
@@ -175,7 +176,9 @@ function App() {
 
       // Clean the response content by removing markdown code blocks and other formatting
       cleanedResponse = responseContent.trim()
-      console.log('Original response:', cleanedResponse.substring(0, 200))
+      console.log('Original response length:', responseContent.length)
+      console.log('Original response preview:', cleanedResponse.substring(0, 200))
+      console.log('Original response ending:', cleanedResponse.substring(Math.max(0, cleanedResponse.length - 200)))
       
       // Simple and reliable markdown cleaning
       // Remove **text** patterns
@@ -197,77 +200,181 @@ function App() {
       
       console.log('After markdown cleaning:', cleanedResponse.substring(0, 200))
       
-      // More sophisticated JSON extraction
+      // More sophisticated JSON extraction that handles large responses
       let jsonContent = cleanedResponse
       
-      // First try to find array format [...]
-      const arrayStartIndex = cleanedResponse.indexOf('[')
-      if (arrayStartIndex !== -1) {
-        // Find the matching closing bracket by counting
-        let bracketCount = 0
-        let endPos = arrayStartIndex
-        
-        for (let i = arrayStartIndex; i < cleanedResponse.length; i++) {
-          if (cleanedResponse[i] === '[') {
-            bracketCount++
-          } else if (cleanedResponse[i] === ']') {
-            bracketCount--
-            if (bracketCount === 0) {
-              endPos = i
-              break
-            }
-          }
-        }
-        
-        if (bracketCount === 0) {
-          jsonContent = cleanedResponse.substring(arrayStartIndex, endPos + 1)
-        }
-      } else {
-        // Look for object format {...}
-        const firstBrace = cleanedResponse.indexOf('{')
-        if (firstBrace !== -1) {
-          // Find the matching closing brace by counting
-          let braceCount = 0
-          let endPos = firstBrace
+      // Try to find the complete JSON structure, prioritizing the largest valid JSON from the start
+      const extractCompleteJson = (text: string) => {
+        // Look for array format first [...]
+        const arrayStartIndex = text.indexOf('[')
+        if (arrayStartIndex !== -1) {
+          // Find the last complete closing bracket by counting
+          let bracketCount = 0
+          let lastCompleteEndPos = -1
           
-          for (let i = firstBrace; i < cleanedResponse.length; i++) {
-            if (cleanedResponse[i] === '{') {
-              braceCount++
-            } else if (cleanedResponse[i] === '}') {
-              braceCount--
-              if (braceCount === 0) {
-                endPos = i
-                break
+          for (let i = arrayStartIndex; i < text.length; i++) {
+            if (text[i] === '[') {
+              bracketCount++
+            } else if (text[i] === ']') {
+              bracketCount--
+              if (bracketCount === 0) {
+                lastCompleteEndPos = i
+                // Continue to find the absolute last complete array
               }
             }
           }
           
-          if (braceCount === 0) {
-            jsonContent = cleanedResponse.substring(firstBrace, endPos + 1)
+          if (lastCompleteEndPos !== -1) {
+            const extracted = text.substring(arrayStartIndex, lastCompleteEndPos + 1)
+            console.log(`Extracted array from position ${arrayStartIndex} to ${lastCompleteEndPos}, length: ${extracted.length}`)
+            return extracted
           }
         }
+        
+        // Look for object format {...}
+        const firstBrace = text.indexOf('{')
+        if (firstBrace !== -1) {
+          // Find the last complete closing brace by counting
+          let braceCount = 0
+          let lastCompleteEndPos = -1
+          
+          for (let i = firstBrace; i < text.length; i++) {
+            if (text[i] === '{') {
+              braceCount++
+            } else if (text[i] === '}') {
+              braceCount--
+              if (braceCount === 0) {
+                lastCompleteEndPos = i
+                // Continue to find the absolute last complete object
+              }
+            }
+          }
+          
+          if (lastCompleteEndPos !== -1) {
+            const extracted = text.substring(firstBrace, lastCompleteEndPos + 1)
+            console.log(`Extracted object from position ${firstBrace} to ${lastCompleteEndPos}, length: ${extracted.length}`)
+            return extracted
+          }
+        }
+        
+        return text
       }
       
+      jsonContent = extractCompleteJson(cleanedResponse)
+      
       cleanedResponse = jsonContent.trim()
+      console.log('Extracted JSON content length:', cleanedResponse.length)
+      console.log('Extracted JSON preview:', cleanedResponse.substring(0, 300))
+      console.log('Extracted JSON ending:', cleanedResponse.substring(Math.max(0, cleanedResponse.length - 300)))
       
       // Try to parse the JSON response
       let parsedData: ExtractedData | Record<string, string | number>[]
       try {
         parsedData = JSON.parse(cleanedResponse)
+        console.log('✅ Direct JSON parse successful!')
       } catch (parseError) {
         console.log('Initial JSON parse failed, trying fallback methods...')
         console.log('Cleaned response:', cleanedResponse)
         
         // Try different extraction methods as fallbacks
         const fallbackMethods = [
-          // Method 1: Try to extract array format more aggressively
+          // Method -1: Check if response was truncated and try to use the largest partial array
           () => {
-            const arrayMatch = cleanedResponse.match(/\[\s*\{[\s\S]*?\}\s*\]/g)
-            if (arrayMatch && arrayMatch.length > 0) {
-              // Try each match
-              for (const match of arrayMatch) {
+            if (finishReason === 'length') {
+              console.log('⚠️ Response was truncated due to token limit. Attempting to extract largest partial data...')
+              
+              // Find the largest array that starts from the beginning
+              const arrayStart = cleanedResponse.indexOf('[')
+              if (arrayStart !== -1) {
+                // Find the furthest we can go with complete objects
+                let depth = 0
+                let lastCompleteObject = -1
+                let inString = false
+                let escapeNext = false
+                
+                for (let i = arrayStart; i < cleanedResponse.length; i++) {
+                  const char = cleanedResponse[i]
+                  
+                  if (escapeNext) {
+                    escapeNext = false
+                    continue
+                  }
+                  
+                  if (char === '\\') {
+                    escapeNext = true
+                    continue
+                  }
+                  
+                  if (char === '"' && !escapeNext) {
+                    inString = !inString
+                    continue
+                  }
+                  
+                  if (!inString) {
+                    if (char === '{') {
+                      depth++
+                    } else if (char === '}') {
+                      depth--
+                      if (depth === 1) { // Back to array level
+                        lastCompleteObject = i
+                      }
+                    }
+                  }
+                }
+                
+                if (lastCompleteObject > arrayStart) {
+                  const truncatedArray = cleanedResponse.substring(arrayStart, lastCompleteObject + 1) + ']'
+                  try {
+                    const parsed = JSON.parse(truncatedArray)
+                    console.log(`✅ Recovered ${Array.isArray(parsed) ? parsed.length : 'unknown'} items from truncated response`)
+                    return parsed
+                  } catch (e) {
+                    console.log('Failed to parse truncated array:', e)
+                  }
+                }
+              }
+            }
+            return null
+          },
+          // Method 0: Try to fix the specific quote issue in the response
+          () => {
+            const fixedJson = cleanedResponse
+              // Fix the specific issue: "Sales Value (RM + incomplete quote
+              .replace(/"Sales Value \(RM[^"]*$/gm, '"Sales Value (RM \'000)"')
+              // Fix other common quote issues
+              .replace(/"\s*'([^']*)'\s*"/g, '"$1"') // Fix mixed quotes
+              .replace(/(['"])([^'"]*)\1\s*:\s*\1([^'"]*)\1/g, '"$2": "$3"') // Normalize quotes
+            
+            try {
+              return JSON.parse(fixedJson)
+            } catch {
+              return null
+            }
+          },
+          // Method 1: Try to extract array format - prioritize arrays that start from the beginning
+          () => {
+            const arrayMatches = cleanedResponse.match(/\[\s*\{[\s\S]*?\}\s*\]/g)
+            if (arrayMatches && arrayMatches.length > 0) {
+              // Find matches that start near the beginning of the response
+              const matchesWithPositions = arrayMatches.map(match => ({
+                match,
+                position: cleanedResponse.indexOf(match),
+                length: match.length
+              }))
+              
+              // Sort by: 1) position (earlier first), 2) length (larger first)
+              const sortedMatches = matchesWithPositions.sort((a, b) => {
+                if (a.position !== b.position) {
+                  return a.position - b.position
+                }
+                return b.length - a.length
+              })
+              
+              for (const {match, position, length} of sortedMatches) {
                 try {
-                  return JSON.parse(match)
+                  const parsed = JSON.parse(match)
+                  console.log(`Found valid array starting at position ${position}, ${Array.isArray(parsed) ? parsed.length : 'unknown'} items, length: ${length}`)
+                  return parsed
                 } catch {
                   continue
                 }
@@ -295,6 +402,9 @@ function App() {
               .replace(/,\s*}/g, '}') // Remove trailing commas
               .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
               .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '"$2":') // Fix unquoted keys
+              .replace(/'([^']*)':/g, '"$1":') // Fix single quotes in keys
+              .replace(/:\s*'([^']*)'/g, ': "$1"') // Fix single quotes in values
+              .replace(/"\s*'([^']*)'\s*"/g, '"$1"') // Fix mixed quotes
             
             try {
               return JSON.parse(fixedJson)
@@ -331,44 +441,67 @@ function App() {
             if (fixedJson.startsWith('[') && !fixedJson.endsWith(']')) {
               console.log('Detected truncated array, attempting to fix...')
               
-              // Remove incomplete trailing content (anything after the last complete object)
-              const lastCompleteObject = fixedJson.lastIndexOf('}')
-              if (lastCompleteObject > 0) {
-                fixedJson = fixedJson.substring(0, lastCompleteObject + 1)
+              // Find the last complete object by looking for complete {...} pairs
+              let lastCompleteIndex = -1
+              let braceCount = 0
+              let inString = false
+              let escapeNext = false
+              
+              for (let i = 0; i < fixedJson.length; i++) {
+                const char = fixedJson[i]
+                
+                if (escapeNext) {
+                  escapeNext = false
+                  continue
+                }
+                
+                if (char === '\\') {
+                  escapeNext = true
+                  continue
+                }
+                
+                if (char === '"' && !escapeNext) {
+                  inString = !inString
+                  continue
+                }
+                
+                if (!inString) {
+                  if (char === '{') {
+                    braceCount++
+                  } else if (char === '}') {
+                    braceCount--
+                    if (braceCount === 0) {
+                      lastCompleteIndex = i
+                    }
+                  }
+                }
               }
               
-              // Count open braces vs closed braces
-              let openBraces = 0
-              let openBrackets = 0
-              
-              for (const char of fixedJson) {
-                if (char === '{') openBraces++
-                else if (char === '}') openBraces--
-                else if (char === '[') openBrackets++
-                else if (char === ']') openBrackets--
-              }
-              
-              console.log(`Open braces: ${openBraces}, Open brackets: ${openBrackets}`)
-              
-              // Close any unclosed objects
-              while (openBraces > 0) {
-                fixedJson += '}'
-                openBraces--
-              }
-              
-              // Close the main array
-              if (openBrackets > 0) {
-                fixedJson += ']'
-              }
-              
-              try {
-                console.log('Attempting to parse fixed JSON...')
-                const parsed = JSON.parse(fixedJson)
-                console.log('✅ Successfully parsed truncated JSON!')
-                return parsed
-              } catch (e) {
-                console.log('Fixed JSON still invalid:', e)
-                return null
+              if (lastCompleteIndex > 0) {
+                fixedJson = fixedJson.substring(0, lastCompleteIndex + 1)
+                
+                // Count final brackets to close the array
+                let bracketCount = 0
+                for (const char of fixedJson) {
+                  if (char === '[') bracketCount++
+                  else if (char === ']') bracketCount--
+                }
+                
+                // Close the main array
+                while (bracketCount > 0) {
+                  fixedJson += ']'
+                  bracketCount--
+                }
+                
+                try {
+                  console.log('Attempting to parse fixed JSON...')
+                  const parsed = JSON.parse(fixedJson)
+                  console.log('✅ Successfully parsed truncated JSON!')
+                  return parsed
+                } catch (e) {
+                  console.log('Fixed JSON still invalid:', e)
+                  return null
+                }
               }
             }
             
@@ -377,16 +510,19 @@ function App() {
         ]
         
         // Try each fallback method
-        for (const method of fallbackMethods) {
+        for (let i = 0; i < fallbackMethods.length; i++) {
+          const method = fallbackMethods[i]
           try {
+            console.log(`Trying fallback method ${i + 1}/${fallbackMethods.length}...`)
             const result = method()
             if (result) {
-              console.log('Fallback method succeeded!')
+              console.log(`✅ Fallback method ${i + 1} succeeded!`)
               
               // Check if this was the truncation fix method
-              if (fallbackMethods.indexOf(method) === 4) { // Method 5 (index 4)
-                console.warn('⚠️ Used truncated JSON fix - some data may be incomplete')
-                // You could set a flag here to show a warning to the user
+              if (i === 0) { // Method -1 (index 0) - truncation recovery method
+                console.warn('⚠️ Used truncated JSON recovery - data may be incomplete')
+              } else if (i === 6) { // Method 5 (index 6) - manual truncation fix method
+                console.warn('⚠️ Used manual truncated JSON fix - some data may be incomplete')
               }
               
               setExtractedData(result as ExtractedData | Record<string, string | number>[])
@@ -399,7 +535,7 @@ function App() {
               return
             }
           } catch (e) {
-            console.log('Fallback method failed:', e)
+            console.log(`Fallback method ${i + 1} failed:`, e)
             continue
           }
         }
@@ -584,7 +720,7 @@ Malaysia	123	456`
           }
         ],
         temperature: 0.1,
-        max_tokens: 8000 // Reduced to help with rate limits
+        max_tokens: 50000 // Reduced to help with rate limits
       })
 
       const response = completion.choices[0]?.message?.content
@@ -657,6 +793,7 @@ Malaysia	123	456`
     setExcelTableData('')
     setError(null)
     setAutoGenerateTable(false)
+    setJsonExpanded(false)
   }
 
   return (
@@ -770,14 +907,35 @@ Malaysia	123	456`
             {extractedData && (
               <Card className="mb-6">
                 <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    ✨ Formatted JSON Data
-                  </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      ✨ Formatted JSON Data
+                    </CardTitle>
+                    <Button
+                      onClick={() => setJsonExpanded(!jsonExpanded)}
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                    >
+                      {jsonExpanded ? '📉 Collapse' : '📈 Expand All'}
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    <div className="bg-gray-900 p-4 rounded-lg border overflow-auto max-h-96">
-                      <pre className="text-green-400 text-sm font-mono leading-relaxed">
+                    <div className={`bg-gray-900 p-4 rounded-lg border overflow-auto transition-all duration-300 ${jsonExpanded ? 'max-h-none' : 'max-h-96 hover:max-h-[600px]'}`}>
+                      <div className="text-xs text-gray-400 mb-2">
+                        💡 {jsonExpanded ? 'Full view enabled' : 'Hover to expand temporarily'} • Click JSON to select all • {JSON.stringify(extractedData).length.toLocaleString()} characters
+                      </div>
+                      <pre 
+                        className="text-green-400 text-sm font-mono leading-relaxed cursor-pointer select-all"
+                        onClick={(e) => {
+                          const selection = window.getSelection()
+                          if (selection) {
+                            selection.selectAllChildren(e.currentTarget)
+                          }
+                        }}
+                      >
                         {JSON.stringify(extractedData, null, 2)}
                       </pre>
                     </div>
