@@ -45,6 +45,7 @@ function App() {
   const [processingWithAI, setProcessingWithAI] = useState(false)
   const [excelTableData, setExcelTableData] = useState<string>('')
   const [generatingTable, setGeneratingTable] = useState(false)
+  const [autoGenerateTable, setAutoGenerateTable] = useState(false)
   
   const API_KEY=import.meta.env.VITE_GROQ_API_KEY;
 
@@ -389,8 +390,12 @@ function App() {
               }
               
               setExtractedData(result as ExtractedData | Record<string, string | number>[])
-              // Generate Excel table after setting data
-              generateTableData(result as ExtractedData | Record<string, string | number>[])
+              // Only auto-generate table if enabled (disabled by default to avoid rate limits)
+              if (autoGenerateTable) {
+                generateTableData(result as ExtractedData | Record<string, string | number>[])
+              } else {
+                setExcelTableData('Click "🔄 Generate Table" below to create Excel-formatted table')
+              }
               return
             }
           } catch (e) {
@@ -404,8 +409,12 @@ function App() {
       }
       
       setExtractedData(parsedData as ExtractedData)
-      // Generate Excel table after setting data
-      generateTableData(parsedData as ExtractedData)
+      // Only auto-generate table if enabled (disabled by default to avoid rate limits)
+      if (autoGenerateTable) {
+        generateTableData(parsedData as ExtractedData)
+      } else {
+        setExcelTableData('Click "🔄 Generate Table" below to create Excel-formatted table')
+      }
       
     } catch (err) {
       console.error('Error processing with AI:', err)
@@ -540,7 +549,9 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  const generateExcelTable = async (data: ExtractedData | Record<string, string | number>[]): Promise<string> => {
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+  const generateExcelTable = async (data: ExtractedData | Record<string, string | number>[], retryCount = 0): Promise<string> => {
     try {
       console.log('Generating Excel table with AI...')
       
@@ -573,7 +584,7 @@ Malaysia	123	456`
           }
         ],
         temperature: 0.1,
-        max_tokens: 20000
+        max_tokens: 8000 // Reduced to help with rate limits
       })
 
       const response = completion.choices[0]?.message?.content
@@ -590,31 +601,51 @@ Malaysia	123	456`
       console.log('✅ Successfully generated Excel table with AI')
       return cleanedTable
       
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error generating Excel table with AI:', error)
       
-      // Fallback to simple stringification if AI fails
-      if (Array.isArray(data)) {
-        if (data.length === 0) return 'No data available'
+      // Handle rate limit errors with exponential backoff
+      const isRateLimit = error && typeof error === 'object' && 'status' in error && error.status === 429
+      
+      if (isRateLimit && retryCount < 3) {
+        const waitTime = Math.pow(2, retryCount) * 5000 // 5s, 10s, 20s
+        console.log(`⏳ Rate limited. Waiting ${waitTime/1000}s before retry ${retryCount + 1}/3...`)
         
-        console.log('Using fallback table generation...')
-        // Simple fallback - just show the JSON structure
-        const headers = Object.keys(data[0])
-        const headerRow = headers.join('\t')
-        const rows = data.map(row => 
-          headers.map(key => {
-            const value = row[key]
-            if (typeof value === 'object' && value !== null) {
-              return JSON.stringify(value)
-            }
-            return String(value || '-')
-          }).join('\t')
-        )
-        
-        return [headerRow, ...rows].join('\n')
-      } else {
-        return 'Data format not supported for table generation'
+        await sleep(waitTime)
+        return generateExcelTable(data, retryCount + 1)
       }
+      
+      // If rate limited and out of retries, provide helpful message
+      if (isRateLimit) {
+        return `Rate limit reached. Please wait a few minutes and click "🔄 Regenerate Table" to try again.\n\nOr use the fallback table below:\n\n${generateFallbackTable(data)}`
+      }
+      
+      // For other errors, use fallback
+      return generateFallbackTable(data)
+    }
+  }
+
+  const generateFallbackTable = (data: ExtractedData | Record<string, string | number>[]): string => {
+    if (Array.isArray(data)) {
+      if (data.length === 0) return 'No data available'
+      
+      console.log('Using fallback table generation...')
+      // Simple fallback - just show the JSON structure
+      const headers = Object.keys(data[0])
+      const headerRow = headers.join('\t')
+      const rows = data.map(row => 
+        headers.map(key => {
+          const value = row[key]
+          if (typeof value === 'object' && value !== null) {
+            return JSON.stringify(value)
+          }
+          return String(value || '-')
+        }).join('\t')
+      )
+      
+      return [headerRow, ...rows].join('\n')
+    } else {
+      return 'Data format not supported for table generation'
     }
   }
 
@@ -670,6 +701,21 @@ Malaysia	123	456`
                   className="mt-1"
                 />
               </div> 
+            </div>
+
+            <div className="mb-4">
+              <label className="flex items-center space-x-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={autoGenerateTable}
+                  onChange={(e) => setAutoGenerateTable(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <span>Auto-generate Excel table (uses more API calls)</span>
+              </label>
+              <p className="text-xs text-gray-500 mt-1">
+                💡 Unchecked by default to avoid rate limits. You can manually generate tables after JSON formatting.
+              </p>
             </div>
 
             <Button 
@@ -799,7 +845,7 @@ Malaysia	123	456`
                       className="bg-purple-50 hover:bg-purple-100 border-purple-300"
                       disabled={generatingTable || !extractedData}
                     >
-                      🔄 Regenerate Table
+                      {excelTableData.includes('Click "🔄 Generate Table"') ? '🔄 Generate Table' : '🔄 Regenerate Table'}
                     </Button>
                   </div>
                 </CardContent>
