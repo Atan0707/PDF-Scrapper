@@ -608,7 +608,7 @@ Malaysia	123	456`
       const isRateLimit = error && typeof error === 'object' && 'status' in error && error.status === 429
       
       if (isRateLimit && retryCount < 3) {
-        const waitTime = Math.pow(2, retryCount) * 5000 // 5s, 10s, 20s
+        const waitTime = Math.pow(2, retryCount) * 10000 // 10s, 20s, 40s
         console.log(`⏳ Rate limited. Waiting ${waitTime/1000}s before retry ${retryCount + 1}/3...`)
         
         await sleep(waitTime)
@@ -647,6 +647,16 @@ Malaysia	123	456`
     } else {
       return 'Data format not supported for table generation'
     }
+  }
+
+  const clearAll = () => {
+    setPageTexts([])
+    setStartPage('')
+    setEndPage('')
+    setExtractedData(null)
+    setExcelTableData('')
+    setError(null)
+    setAutoGenerateTable(false)
   }
 
   return (
@@ -718,13 +728,23 @@ Malaysia	123	456`
               </p>
             </div>
 
-            <Button 
-              onClick={extractPagesText} 
-              disabled={loading || !startPage || totalPages === 0}
-              className="w-full"
-            >
-              {loading ? 'Extracting...' : 'Extract Text'}
-            </Button>
+            <div className="flex gap-3">
+              <Button 
+                onClick={extractPagesText} 
+                disabled={loading || !startPage || totalPages === 0}
+                className="flex-1"
+              >
+                {loading ? 'Extracting...' : 'Extract Text'}
+              </Button>
+              <Button 
+                onClick={clearAll}
+                disabled={loading || processingWithAI || generatingTable}
+                variant="outline"
+                className="px-6"
+              >
+                🗑️ Clear
+              </Button>
+            </div>
 
             {error && (
               <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
